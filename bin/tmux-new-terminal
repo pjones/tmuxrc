@@ -1,0 +1,59 @@
+#!/bin/sh -eu
+
+################################################################################
+# This file is part of the tmuxrc package. It is subject to the
+# license terms in the LICENSE file found in the top-level directory
+# of this distribution and at git://git.devalot.com/tmuxrc/LICENSE. No
+# part of this package, including this file, may be copied, modified,
+# propagated, or distributed except according to the terms contained
+# in the LICENSE file.
+
+################################################################################
+SESSION_NAME=""
+TTY_NUMBER=`tty | cut -d/ -f4`
+
+################################################################################
+usage () {
+cat <<EOF
+Usage: tmux-new-terminal [options]
+
+  -h      This message
+  -s NAME Set the session name
+EOF
+}
+
+################################################################################
+while getopts "hs:" o; do
+  case "${o}" in
+    h) usage
+       exit
+       ;;
+
+    s) SESSION_NAME=$OPTARG
+       ;;
+
+    *) exit 1
+       ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+################################################################################
+# Take the session name from the current workspace name.
+if [ -z "$SESSION_NAME" -a -z "$DISPLAY" ]; then
+  SESSION_NAME=`wmctrl -d | awk '($2 ~ /\*/) {print $NF}'`
+fi
+
+# Failing that, set it to something generic.
+[ -z "$SESSION_NAME" ] && SESSION_NAME=scratch
+
+################################################################################
+# Make sure the target session exists.
+if ! tmux has-session -t "$SESSION_NAME" 2> /dev/null; then
+  tmux new-session -s "$SESSION_NAME" -d
+fi
+
+# Create a new session and group it with $SESSION_NAME.
+# (The $TTY_NUMBER is used to ensure the session name is unique.)
+exec tmux new-session -t "$SESSION_NAME" -s "$SESSION_NAME"/$TTY_NUMBER
