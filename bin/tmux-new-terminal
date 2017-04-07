@@ -45,7 +45,7 @@ shift $((OPTIND-1))
 
 ################################################################################
 # Take the session name from the current workspace name.
-if [ -z "$SESSION_NAME" -a -z "$DISPLAY" ]; then
+if [ -z "$SESSION_NAME" -a -n "$DISPLAY" ]; then
   SESSION_NAME=`wmctrl -d | awk '($2 ~ /\*/) {print $NF}'`
 fi
 
