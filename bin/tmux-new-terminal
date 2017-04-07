@@ -13,6 +13,10 @@ SESSION_NAME=""
 TTY_NUMBER=`tty | cut -d/ -f4`
 
 ################################################################################
+# Some environment variables for the new session:
+export GPG_TTY=`tty`
+
+################################################################################
 usage () {
 cat <<EOF
 Usage: tmux-new-terminal [options]
