@@ -60,4 +60,6 @@ fi
 
 # Create a new session and group it with $SESSION_NAME.
 # (The $TTY_NUMBER is used to ensure the session name is unique.)
-exec tmux new-session -t "$SESSION_NAME" -s "$SESSION_NAME"/$TTY_NUMBER
+exec tmux \
+     new-session -A -t "$SESSION_NAME" -s "$SESSION_NAME"/$TTY_NUMBER \; \
+     new-window "${SHELL:-zsh}; tmux detach-client"
