@@ -1,4 +1,4 @@
-#!/bin/sh -eu
+#!/usr/bin/env bash
 
 ################################################################################
 # This file is part of the tmuxrc package. It is subject to the
@@ -9,12 +9,25 @@
 # in the LICENSE file.
 
 ################################################################################
+# This script is an overly complex way of hiding tmux in a terminal
+# emulator.  Each new terminal that is opened has a unique tmux
+# session associated with it.  However, all terminals from the same
+# desktop are grouped together using a session name prefix.
+#
+# Closing the only tmux window or the terminal will terminate the
+# current session.  Turning on the tmux status bar will tell this
+# script that you want the session to persist.
+
+################################################################################
+SESSION_GROUP=""
 SESSION_NAME=""
-TTY_NUMBER=`tty | cut -d/ -f4`
+TTY_NUMBER=$(tty | cut -d/ -f4)
+TERM_CLOSED=0
 
 ################################################################################
 # Some environment variables for the new session:
-export GPG_TTY=`tty`
+GPG_TTY=$(tty)
+export GPG_TTY
 
 ################################################################################
 usage () {
@@ -22,15 +35,19 @@ cat <<EOF
 Usage: tmux-new-terminal [options]
 
   -h      This message
-  -s NAME Set the session name
+  -g NAME Set the session group name
+  -s NAME Set the target session name
 EOF
 }
 
 ################################################################################
-while getopts "hs:" o; do
+while getopts "hg:s:" o; do
   case "${o}" in
     h) usage
        exit
+       ;;
+
+    g) SESSION_GROUP=$OPTARG
        ;;
 
     s) SESSION_NAME=$OPTARG
@@ -44,22 +61,67 @@ done
 shift $((OPTIND-1))
 
 ################################################################################
-# Take the session name from the current workspace name.
-if [ -z "$SESSION_NAME" -a -n "$DISPLAY" ]; then
-  SESSION_NAME=`wmctrl -d | awk '($2 ~ /\*/) {print $NF}'`
+# Find a session in the current group that has no clients.
+find_inactive_sessions() {
+  local format='#{session_name}|#{session_attached}'
+
+  (tmux list-sessions -F "$format" || :) | \
+    (grep --fixed-strings "/${SESSION_GROUP}|0" || :) | \
+    cut -d'|' -f1
+}
+
+################################################################################
+# When the parent terminal closes, figure out what to do with tmux.
+terminal_window_closed() {
+  if [ "$TERM_CLOSED" -eq 1 ]; then return; fi
+  TERM_CLOSED=1
+
+  trap "" SIGHUP  # Don't re-enter this function
+  trap "" SIGPIPE # Don't die on writes to the terminal
+
+  status=$(tmux show-options -t "$SESSION_NAME" -v status)
+  windows=$(tmux list-windows -t "$SESSION_NAME" | wc -l)
+
+  if [ "$status" = "on" ] || [ "$windows" -gt 1 ]; then
+    # Help tmux know the session is detached.  Without this it will
+    # still display the session as attached.
+    tmux detach-client -s "$SESSION_NAME"
+  else
+    # Kill the session and its windows.
+    tmux kill-session -t "$SESSION_NAME"
+  fi
+}
+
+################################################################################
+# Create a new session and group it with $SESSION_GROUP.
+join_session() {
+  local other_session
+  other_session=$(find_inactive_sessions | sort | head -1)
+
+  # Deal with the outer terminal window closing.
+  trap terminal_window_closed SIGHUP
+
+  # Start tmux.
+  if [ -n "$other_session" ]; then
+    tmux attach-session -t "$other_session"
+  else
+    tmux new-session -A -s "$SESSION_NAME"
+  fi
+}
+
+################################################################################
+# Take the session group from the current workspace name.
+if [ -z "$SESSION_GROUP" ] && [ -n "$DISPLAY" ]; then
+  SESSION_GROUP=$(wmctrl -d | awk '($2 ~ /\*/) {print $NF}')
 fi
 
 # Failing that, set it to something generic.
-[ -z "$SESSION_NAME" ] && SESSION_NAME=scratch
+[ -z "$SESSION_GROUP" ] && SESSION_GROUP=scratch
 
-################################################################################
-# Make sure the target session exists.
-if ! tmux has-session -t "$SESSION_NAME" 2> /dev/null; then
-  tmux new-session -s "$SESSION_NAME" -d
+# Take the session name from the group and current TTY.
+# (The $TTY_NUMBER is used to ensure the session name is unique.)
+if [ -z "$SESSION_NAME" ]; then
+  SESSION_NAME="$SESSION_GROUP/$TTY_NUMBER"
 fi
 
-# Create a new session and group it with $SESSION_NAME.
-# (The $TTY_NUMBER is used to ensure the session name is unique.)
-exec tmux \
-     new-session -A -t "$SESSION_NAME" -s "$SESSION_NAME"/$TTY_NUMBER \; \
-     new-window "${SHELL:-zsh}; tmux detach-client"
+join_session
