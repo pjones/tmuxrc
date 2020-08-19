@@ -30,8 +30,8 @@ GPG_TTY=$(tty)
 export GPG_TTY
 
 ################################################################################
-usage () {
-cat <<EOF
+usage() {
+  cat <<EOF
 Usage: tmux-new-terminal [options]
 
   -h      This message
@@ -43,30 +43,34 @@ EOF
 ################################################################################
 while getopts "hg:s:" o; do
   case "${o}" in
-    h) usage
-       exit
-       ;;
+  h)
+    usage
+    exit
+    ;;
 
-    g) SESSION_GROUP=$OPTARG
-       ;;
+  g)
+    SESSION_GROUP=$OPTARG
+    ;;
 
-    s) SESSION_NAME=$OPTARG
-       ;;
+  s)
+    SESSION_NAME=$OPTARG
+    ;;
 
-    *) exit 1
-       ;;
+  *)
+    exit 1
+    ;;
   esac
 done
 
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 ################################################################################
 # Find a session in the current group that has no clients.
 find_inactive_sessions() {
   local format='#{session_name}|#{session_attached}'
 
-  (tmux list-sessions -F "$format" || :) | \
-    (grep --fixed-strings "/${SESSION_GROUP}|0" || :) | \
+  (tmux list-sessions -F "$format" || :) |
+    (grep --fixed-strings "/${SESSION_GROUP}|0" || :) |
     cut -d'|' -f1
 }
 
@@ -112,7 +116,7 @@ join_session() {
 ################################################################################
 # Take the session group from the current workspace name.
 if [ -z "$SESSION_GROUP" ] && [ -n "$DISPLAY" ]; then
-  SESSION_GROUP=$(wmctrl -d | awk '($2 ~ /\*/) {print $NF}')
+  SESSION_GROUP=$( (wmctrl -d || echo "* 0") | awk '($2 ~ /\*/) {print $NF}')
 fi
 
 # Failing that, set it to something generic.
