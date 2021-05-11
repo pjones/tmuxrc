@@ -12,15 +12,11 @@
 # This script is an overly complex way of hiding tmux in a terminal
 # emulator.  Each new terminal that is opened has a unique tmux
 # session associated with it.  However, all terminals from the same
-# desktop are grouped together using a session name prefix.
-#
-# Closing the only tmux window or the terminal will terminate the
-# current session.  Turning on the tmux status bar will tell this
-# script that you want the session to persist.
+# desktop/workspace are grouped together and share windows.
 
 ################################################################################
-SESSION_GROUP=""
-SESSION_NAME=""
+SESSION_GROUP=${SESSION_GROUP:-}
+SESSION_NAME=${SESSION_NAME:-}
 TTY_NUMBER=$(tty | cut -d/ -f4)
 TERM_CLOSED=0
 
@@ -67,11 +63,25 @@ shift $((OPTIND - 1))
 ################################################################################
 # Find a session in the current group that has no clients.
 find_inactive_sessions() {
-  local format='#{session_name}|#{session_attached}'
+  local format='#{session_name}|#{session_group}|#{session_attached}'
 
   (tmux list-sessions -F "$format" || :) |
-    (grep --fixed-strings "/${SESSION_GROUP}|0" || :) |
-    cut -d'|' -f1
+    (awk \
+      --assign SGROUP="$SESSION_GROUP" \
+      --field-separator '|' \
+      '$2 == SGROUP && $3 == "0" { print $1 }' || :) |
+    sort |
+    head -1
+}
+
+################################################################################
+# Count the number of active sessions in the current group.
+count_active_sessions() {
+  local format='|#{session_group}|'
+
+  (tmux list-sessions -F "$format" || :) |
+    (grep --fixed-strings "|$SESSION_GROUP|" || :) |
+    wc -l
 }
 
 ################################################################################
@@ -83,15 +93,21 @@ terminal_window_closed() {
   trap "" SIGHUP  # Don't re-enter this function
   trap "" SIGPIPE # Don't die on writes to the terminal
 
-  status=$(tmux show-options -t "$SESSION_NAME" -v status)
+  local windows
   windows=$(tmux list-windows -t "$SESSION_NAME" | wc -l)
 
-  if [ "$status" = "on" ] || [ "$windows" -gt 1 ]; then
-    # Help tmux know the session is detached.  Without this it will
-    # still display the session as attached.
+  if [ "$(count_active_sessions)" -gt 1 ]; then
+    # There are other sessions in the group so we'll kill this
+    # session since you can always reattach to the group.
+    tmux kill-session -t "$SESSION_NAME"
+  elif [ "$windows" -gt 1 ]; then
+    # This is the last session and we still have windows.  Just
+    # detach.
     tmux detach-client -s "$SESSION_NAME"
   else
-    # Kill the session and its windows.
+    # Last session in the group, but there's at most a single window.
+    # Assume the user wanted to kill the session when killing the
+    # terminal.
     tmux kill-session -t "$SESSION_NAME"
   fi
 }
@@ -99,8 +115,15 @@ terminal_window_closed() {
 ################################################################################
 # Create a new session and group it with $SESSION_GROUP.
 join_session() {
+  local new_session
+  new_session=(
+    "new-session" "-A"
+    "-s" "$SESSION_NAME"
+    "-t" "$SESSION_GROUP"
+  )
+
   local other_session
-  other_session=$(find_inactive_sessions | sort | head -1)
+  other_session=$(find_inactive_sessions)
 
   # Deal with the outer terminal window closing.
   trap terminal_window_closed SIGHUP
@@ -108,8 +131,10 @@ join_session() {
   # Start tmux.
   if [ -n "$other_session" ]; then
     tmux attach-session -t "$other_session"
+  elif [ "$(count_active_sessions)" -gt 0 ]; then
+    tmux "${new_session[@]}" ';' new-window
   else
-    tmux new-session -A -s "$SESSION_NAME"
+    tmux "${new_session[@]}"
   fi
 }
 
